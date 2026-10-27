@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import AdminUsers from './pages/AdminUsers';
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="admin/dashboard" element={<AdminDashboard />} />
+          <Route path="admin/users" element={<AdminUsers />} />
         </Route>
       </Routes>
     </Router>

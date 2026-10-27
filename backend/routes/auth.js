@@ -58,13 +58,29 @@ router.post('/login', async (req, res) => {
             return res.status(401).json({ error: 'Credenciales inválidas' });
         }
 
+        // Verificar si el trabajador está en TRASPASO_FUNCIONARIOS
+        if (isWorker && matchWorker) {
+            const traspasoCheck = await pool.request()
+                .input('run', sql.VarChar, userRecord.rut_empleado)
+                .query('SELECT TOP 1 RUN FROM dbo.TRASPASO_FUNCIONARIOS WHERE RUN = @run');
+            
+            if (traspasoCheck.recordset.length === 0) {
+                // Si también es admin con clave correcta, le dejamos entrar solo como admin
+                if (isAdmin && matchAdmin) {
+                    isWorker = false; 
+                } else {
+                    return res.status(403).json({ error: 'USTED NO ESTÁ CONSIDERADO EN LA NÓMINA DE TRASPASO AL SLEP. Para mayor información comunicarse mediante mail RRHHResponde@cmds.cl' });
+                }
+            }
+        }
+
         let roles = [];
-        if (isWorker) roles.push('worker');
-        if (isAdmin) roles.push('admin');
+        if (isWorker && matchWorker) roles.push('worker');
+        if (isAdmin && matchAdmin) roles.push('admin');
 
         const fullRut = isWorker ? `${userRecord.rut_empleado}${userRecord.dv}` : adminRecord.username;
         const nombreCompleto = isWorker ? `${userRecord.NOMBRE} ${userRecord.PATERNO} ${userRecord.MATERNO}`.trim() : adminRecord.nombre;
-        const mustChange = isWorker ? !userRecord.password_changed : false; // Asumimos que admin puro no requiere cambio forzado
+        const mustChange = isWorker ? !userRecord.password_changed : !adminRecord.password_changed;
 
         const token = jwt.sign(
             { 
@@ -139,7 +155,7 @@ router.post('/change-password', async (req, res) => {
         await pool.request()
             .input('rutFull', sql.VarChar, rut)
             .input('password', sql.VarChar, hashedPassword)
-            .query('UPDATE dbo.Administradores SET password = @password WHERE username = @rutFull');
+            .query('UPDATE dbo.Administradores SET password = @password, password_changed = 1 WHERE username = @rutFull');
 
         res.json({ success: true, message: 'Contraseña cambiada exitosamente' });
 

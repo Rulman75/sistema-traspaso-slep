@@ -84,7 +84,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-[#f4f7f6]">
       <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md border border-slate-200">
         <div className="flex justify-center mb-6">
-          <img src="/logo.png" alt="CMDS Logo" className="h-20 object-contain" />
+          <img src="/logo.png" alt="CMDS Logo" className="h-32 object-contain" />
         </div>
         
         <h2 className="text-2xl font-bold text-center text-[#016098] mb-2">

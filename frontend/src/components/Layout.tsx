@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { FileCheck, LogOut, BarChart3 } from 'lucide-react';
+import { FileCheck, LogOut, BarChart3, Users } from 'lucide-react';
 
 interface UserData {
   rut: string;
@@ -97,19 +97,34 @@ export default function Layout() {
             )}
             
             {isAdmin && (
-              <li>
-                <Link 
-                  to="/admin/dashboard" 
-                  className={`flex items-center gap-3 w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 mt-2 ${
-                    isActive('/admin/dashboard') 
-                    ? 'bg-[#016098] text-white' 
-                    : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
-                  }`}
-                >
-                  <BarChart3 size={18} />
-                  Panel Administrador
-                </Link>
-              </li>
+              <>
+                <li>
+                  <Link 
+                    to="/admin/dashboard" 
+                    className={`flex items-center gap-3 w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 mt-2 ${
+                      isActive('/admin/dashboard') 
+                      ? 'bg-[#016098] text-white' 
+                      : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                    }`}
+                  >
+                    <BarChart3 size={18} />
+                    Panel Administrador
+                  </Link>
+                </li>
+                <li>
+                  <Link 
+                    to="/admin/users" 
+                    className={`flex items-center gap-3 w-full px-4 py-3 text-sm font-medium rounded-lg transition-colors duration-200 mt-2 ${
+                      isActive('/admin/users') 
+                      ? 'bg-[#016098] text-white' 
+                      : 'text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#016098]'
+                    }`}
+                  >
+                    <Users size={18} />
+                    Administradores
+                  </Link>
+                </li>
+              </>
             )}
           </ul>
         </nav>

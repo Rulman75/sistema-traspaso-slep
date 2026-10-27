@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Search, KeyRound, Eye, CheckCircle, AlertCircle, Clock, Users, Download } from 'lucide-react';
+import { Search, KeyRound, Eye, CheckCircle, AlertCircle, Clock, Users, Download, ClipboardCheck, Undo2, MonitorPlay } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface Stats {
   total_activos: number;
-  total_ok: number;
-  total_rechazados: number;
+  total_aprobado_funcionario: number;
+  total_rechazado_funcionario: number;
+  total_aprobado_cmds: number;
+  total_rechazado_cmds: number;
+  total_pendiente_bienio: number;
   total_pendientes: number;
 }
 
@@ -19,6 +22,10 @@ interface Worker {
   estado_validacion: string;
   fecha_reclamo: string;
   ruta_evidencia: string;
+  rechazo_motivo: string;
+  observaciones: string;
+  email: string;
+  celular: string;
 }
 
 export default function AdminDashboard() {
@@ -26,6 +33,11 @@ export default function AdminDashboard() {
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Modal Evaluation
+  const [evaluatingWorker, setEvaluatingWorker] = useState<Worker | null>(null);
+  const [resolutionAction, setResolutionAction] = useState<string>('');
+  const [submittingResolution, setSubmittingResolution] = useState(false);
+
   // Filters
   const [filterRut, setFilterRut] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
@@ -66,13 +78,41 @@ export default function AdminDashboard() {
   };
 
   const handleResetPassword = async (rut: string, dv: string) => {
-    if (!window.confirm(`¿Estás seguro de resetear la contraseña del RUT ${rut}-${dv} a "1234"?`)) return;
+    if (!window.confirm(`¿Estás seguro de resetear la contraseña del RUT ${rut}-${dv}?`)) return;
     
     try {
       await axios.post('/api/admin/reset-password', { rut }, authConfig);
-      alert('Contraseña reseteada exitosamente a 1234.');
+      alert('Contraseña reseteada exitosamente a los primeros 4 dígitos del RUT.');
     } catch (err) {
       alert('Error al resetear la contraseña.');
+    }
+  };
+
+  const [observacionAdmin, setObservacionAdmin] = useState('');
+
+  const handleResolveClaim = async () => {
+    if (!evaluatingWorker || !resolutionAction) return;
+    
+    setSubmittingResolution(true);
+    try {
+      await axios.post('/api/admin/resolve-claim', {
+        rut: evaluatingWorker.rut,
+        email: evaluatingWorker.email,
+        nombre: evaluatingWorker.nombre_completo,
+        tipoRespuesta: resolutionAction,
+        observacionAdmin: (resolutionAction === '1' || resolutionAction === '2') ? observacionAdmin : ''
+      }, authConfig);
+      
+      alert('Resolución enviada y estado actualizado correctamente.');
+      setEvaluatingWorker(null);
+      setResolutionAction('');
+      setObservacionAdmin('');
+      fetchWorkers();
+      fetchStats();
+    } catch (err) {
+      alert('Error al enviar la resolución.');
+    } finally {
+      setSubmittingResolution(false);
     }
   };
 
@@ -88,13 +128,40 @@ export default function AdminDashboard() {
       'Unidad / Establecimiento': w.unidad || 'NO REGISTRA',
       'Tipo de Contrato': w.tipo_contrato,
       'Estado Validación': w.estado_validacion || 'PENDIENTE',
-      'Fecha Reclamo': w.fecha_reclamo ? new Date(w.fecha_reclamo).toLocaleDateString('es-CL') : 'N/A'
+      'Fecha Transacción': w.fecha_reclamo ? new Date(w.fecha_reclamo).toLocaleDateString('es-CL') : 'N/A',
+      'Motivo Rechazo': w.rechazo_motivo || '',
+      'Observaciones': w.observaciones || '',
+      'Correo': w.email || '',
+      'Teléfono': w.celular || ''
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Funcionarios");
     XLSX.writeFile(workbook, `Reporte_Validacion_SLEP_${new Date().toISOString().slice(0,10)}.xlsx`);
+  };
+
+  const handleUndoValidation = async (rut: string, nombre: string) => {
+    if (!window.confirm(`¿Está seguro de deshacer la validación de ${nombre}?\n\nEsto devolverá el estado a PENDIENTE, borrará su respuesta y eliminará los archivos de evidencia subidos para que pueda volver a validar desde cero.`)) return;
+    try {
+      await axios.post(`/api/admin/workers/${rut}/reset`, {}, authConfig);
+      alert('Validación deshecha correctamente.');
+      fetchWorkers();
+      fetchStats();
+    } catch (err) {
+      alert('Error al deshacer validación.');
+    }
+  };
+
+  const handleImpersonate = async (rut: string) => {
+    try {
+      const res = await axios.post(`/api/admin/impersonate/${rut}`, {}, authConfig);
+      const { token } = res.data;
+      // Abrir en nueva pestaña con el token
+      window.open(`/dashboard?token=${token}`, '_blank');
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Error al simular sesión del trabajador.');
+    }
   };
 
   const StatCard = ({ title, value, icon, colorClass }: any) => (
@@ -112,11 +179,14 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6">
       {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <StatCard title="Total Funcionarios Activos" value={stats?.total_activos} icon={<Users size={24} />} colorClass="bg-blue-50 text-blue-600" />
-        <StatCard title="Validados (OK)" value={stats?.total_ok} icon={<CheckCircle size={24} />} colorClass="bg-green-50 text-green-600" />
-        <StatCard title="Rechazados (Con Reparo)" value={stats?.total_rechazados} icon={<AlertCircle size={24} />} colorClass="bg-amber-50 text-amber-600" />
-        <StatCard title="Pendientes" value={stats?.total_pendientes} icon={<Clock size={24} />} colorClass="bg-slate-50 text-slate-600" />
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+        <StatCard title="Total Funcionarios" value={stats?.total_activos} icon={<Users size={20} />} colorClass="bg-slate-100 text-slate-700" />
+        <StatCard title="Pendiente Inicial" value={stats?.total_pendientes} icon={<Clock size={20} />} colorClass="bg-slate-100 text-slate-600" />
+        <StatCard title="Aprobado Funcionario" value={stats?.total_aprobado_funcionario} icon={<CheckCircle size={20} />} colorClass="bg-green-50 text-green-600" />
+        <StatCard title="Rechazado Funcionario" value={stats?.total_rechazado_funcionario} icon={<AlertCircle size={20} />} colorClass="bg-amber-50 text-amber-600" />
+        <StatCard title="Aprobado CMDS" value={stats?.total_aprobado_cmds} icon={<CheckCircle size={20} />} colorClass="bg-blue-50 text-blue-600" />
+        <StatCard title="Rechazado CMDS" value={stats?.total_rechazado_cmds} icon={<AlertCircle size={20} />} colorClass="bg-red-50 text-red-600" />
+        <StatCard title="Pendiente Bienio" value={stats?.total_pendiente_bienio} icon={<Clock size={20} />} colorClass="bg-purple-50 text-purple-600" />
       </div>
 
       {/* Filters and Grid */}
@@ -140,9 +210,12 @@ export default function AdminDashboard() {
               className="px-3 py-1.5 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 outline-none w-40"
             >
               <option value="">Todos</option>
-              <option value="OK">OK</option>
-              <option value="RECHAZADO">RECHAZADO</option>
               <option value="PENDIENTE">PENDIENTE</option>
+              <option value="APROBADO FUNCIONARIO">APROBADO FUNCIONARIO</option>
+              <option value="RECHAZADO FUNCIONARIO">RECHAZADO FUNCIONARIO</option>
+              <option value="APROBADO CMDS">APROBADO CMDS</option>
+              <option value="RECHAZADO CMDS">RECHAZADO CMDS</option>
+              <option value="PENDIENTE BIENIO">PENDIENTE BIENIO</option>
             </select>
           </div>
           <div>
@@ -155,13 +228,27 @@ export default function AdminDashboard() {
               <option value="">Todos</option>
               <option value="INDEFINIDO">INDEFINIDO</option>
               <option value="PLAZO FIJO">PLAZO FIJO</option>
+              <option value="REEMPLAZO">REEMPLAZO</option>
             </select>
           </div>
           <button 
             onClick={fetchWorkers}
-            className="bg-slate-800 text-white px-4 py-1.5 text-sm rounded hover:bg-slate-700 transition flex items-center gap-2"
+            disabled={loading}
+            className={`bg-slate-800 text-white px-4 py-1.5 text-sm rounded hover:bg-slate-700 transition flex items-center gap-2 ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
           >
-            <Search size={16} /> Buscar
+            {loading ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Procesando...
+              </>
+            ) : (
+              <>
+                <Search size={16} /> Buscar
+              </>
+            )}
           </button>
 
           <button 
@@ -199,8 +286,11 @@ export default function AdminDashboard() {
                     <td className="px-4 py-3 text-xs">{w.tipo_contrato}</td>
                     <td className="px-4 py-3 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-bold tracking-wide ${
-                        w.estado_validacion === 'OK' ? 'bg-green-100 text-green-700' :
-                        w.estado_validacion === 'RECHAZADO' ? 'bg-amber-100 text-amber-700' :
+                        w.estado_validacion === 'APROBADO FUNCIONARIO' ? 'bg-green-100 text-green-700' :
+                        w.estado_validacion === 'RECHAZADO FUNCIONARIO' ? 'bg-amber-100 text-amber-700' :
+                        w.estado_validacion === 'APROBADO CMDS' ? 'bg-blue-100 text-blue-700' :
+                        w.estado_validacion === 'RECHAZADO CMDS' ? 'bg-red-100 text-red-700' :
+                        w.estado_validacion === 'PENDIENTE BIENIO' ? 'bg-purple-100 text-purple-700' :
                         'bg-slate-100 text-slate-600'
                       }`}>
                         {w.estado_validacion || 'PENDIENTE'}
@@ -214,7 +304,23 @@ export default function AdminDashboard() {
                       >
                         <KeyRound size={16} />
                       </button>
-                      {w.estado_validacion === 'RECHAZADO' && w.ruta_evidencia ? (
+                      <button 
+                        onClick={() => handleImpersonate(w.rut)}
+                        title="Ver pantalla como el funcionario"
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition"
+                      >
+                        <MonitorPlay size={16} />
+                      </button>
+                      {w.estado_validacion && (
+                        <button 
+                          onClick={() => handleUndoValidation(w.rut, w.nombre_completo)}
+                          title="Deshacer validación (Borrar evidencia y volver a PENDIENTE)"
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                        >
+                          <Undo2 size={16} />
+                        </button>
+                      )}
+                      {(w.estado_validacion === 'RECHAZADO FUNCIONARIO' || w.estado_validacion === 'RECHAZADO' || w.estado_validacion === 'RECHAZADO CMDS' || w.estado_validacion === 'APROBADO CMDS' || w.estado_validacion === 'PENDIENTE BIENIO') && w.ruta_evidencia && (
                         <a 
                           href={`/uploads/${w.ruta_evidencia}`} 
                           target="_blank" 
@@ -224,8 +330,15 @@ export default function AdminDashboard() {
                         >
                           <Eye size={16} />
                         </a>
-                      ) : (
-                        <span className="p-1.5 w-[28px] inline-block"></span>
+                      )}
+                      
+                      {w.estado_validacion === 'RECHAZADO FUNCIONARIO' && (
+                        <button
+                          onClick={() => setEvaluatingWorker(w)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-bold bg-[#016098] text-white rounded shadow-sm hover:bg-[#014f7d] transition"
+                        >
+                          <ClipboardCheck size={16} /> Evaluar
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -235,6 +348,76 @@ export default function AdminDashboard() {
           </table>
         </div>
       </div>
+
+      {evaluatingWorker && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-auto">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-slate-800">Evaluar Reclamo de Funcionario</h3>
+              <button onClick={() => setEvaluatingWorker(null)} className="text-slate-400 hover:text-slate-600 font-bold text-xl">&times;</button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50 p-4 rounded-lg border border-slate-200">
+                <div><span className="font-semibold text-slate-600">Nombre:</span> {evaluatingWorker.nombre_completo}</div>
+                <div><span className="font-semibold text-slate-600">RUT:</span> {evaluatingWorker.rut}-{evaluatingWorker.dv}</div>
+                <div><span className="font-semibold text-slate-600">Teléfono:</span> {evaluatingWorker.celular || 'No ingresado'}</div>
+                <div><span className="font-semibold text-slate-600">Correo:</span> {evaluatingWorker.email || 'No ingresado'}</div>
+                <div className="col-span-2 border-t border-slate-200 pt-3 mt-1">
+                  <span className="font-semibold text-slate-600">Información Reclamada:</span> <span className="font-bold text-red-600">{evaluatingWorker.rechazo_motivo || 'No especificado'}</span>
+                </div>
+                <div className="col-span-2">
+                  <span className="font-semibold text-slate-600">Observaciones del Funcionario:</span>
+                  <p className="mt-1 p-3 bg-white border border-slate-200 rounded italic text-slate-700">{evaluatingWorker.observaciones || 'Sin observaciones.'}</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-2">Resolución CMDS (Se enviará por correo automáticamente):</label>
+                <select 
+                  className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500"
+                  value={resolutionAction}
+                  onChange={(e) => setResolutionAction(e.target.value)}
+                >
+                  <option value="">-- Seleccione una Resolución --</option>
+                  <option value="1">APROBAR - "Información modificada según lo solicitado"</option>
+                  <option value="2">RECHAZAR - "Documentos no respaldan lo indicado"</option>
+                  <option value="3">RECHAZAR - "Faltan Documentos para Bienio"</option>
+                </select>
+              </div>
+              
+              {(resolutionAction === '1' || resolutionAction === '2') && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Observación Adicional (Opcional):</label>
+                  <textarea 
+                    className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-blue-500 min-h-[100px]"
+                    placeholder={resolutionAction === '1' ? "Escriba aquí los detalles de la aprobación que se incluirán en el correo..." : "Escriba aquí los detalles del rechazo que se incluirán en el correo..."}
+                    value={observacionAdmin}
+                    onChange={(e) => setObservacionAdmin(e.target.value)}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Este texto se añadirá como un párrafo en el correo de respuesta y será visible por el funcionario.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+              <button 
+                onClick={() => setEvaluatingWorker(null)}
+                className="px-4 py-2 border border-slate-300 rounded text-slate-600 hover:bg-slate-100 font-medium"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleResolveClaim}
+                disabled={!resolutionAction || submittingResolution}
+                className="px-6 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {submittingResolution ? 'Enviando...' : 'Guardar y Enviar Correo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
