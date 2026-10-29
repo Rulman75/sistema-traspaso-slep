@@ -58,6 +58,9 @@ const upload = multer({
 
 router.get('/details', verifyToken, async (req, res) => {
     try {
+        if (!req.user || !req.user.rut_empleado) {
+            return res.status(400).json({ error: 'Su cuenta es de Administrador. Seleccione "Panel Administrador" en el menú izquierdo.' });
+        }
         const pool = await getConnection();
         const query = `
             WITH RankedFunc AS (

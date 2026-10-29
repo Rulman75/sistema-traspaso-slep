@@ -41,10 +41,26 @@ export default function Dashboard() {
   const [successMsg, setSuccessMsg] = useState('');
 
   const urlParams = new URLSearchParams(window.location.search);
-  const token = urlParams.get('token') || localStorage.getItem('token');
+  const urlToken = urlParams.get('token');
+  const token = urlToken || localStorage.getItem('token');
   const authConfig = { headers: { Authorization: `Bearer ${token}` } };
 
   useEffect(() => {
+    // Si no viene un token de simulación en la URL y el usuario es solo Admin (no funcionario), redirigir al panel Admin
+    if (!urlToken) {
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const u = JSON.parse(userStr);
+          if (u.roles?.includes('admin') && !u.roles?.includes('worker')) {
+            window.location.replace('/admin/dashboard');
+            return;
+          }
+        }
+      } catch {
+        // continuar
+      }
+    }
     fetchData();
   }, []);
 
