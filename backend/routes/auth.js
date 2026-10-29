@@ -123,27 +123,36 @@ router.post('/change-password', async (req, res) => {
 
     try {
         const pool = await getConnection();
-        const result = await pool.request()
+
+        // 1. Buscar en PERSONAL
+        const workerResult = await pool.request()
             .input('rut', sql.VarChar, rutNum)
             .input('dv', sql.VarChar, dv)
             .query('SELECT [RUT EMPLEADO] as rut_empleado, password FROM dbo.PERSONAL WHERE [RUT EMPLEADO] = @rut AND (LTRIM(RTRIM(DV)) = @dv OR LOWER(LTRIM(RTRIM(DV))) = LOWER(@dv))');
 
-        if (result.recordset.length === 0) {
+        // 2. Buscar en Administradores (por username exacto o limpio)
+        const adminResult = await pool.request()
+            .input('rutFull', sql.VarChar, cleanRut)
+            .input('rutRaw', sql.VarChar, (rut || '').toString().trim())
+            .query('SELECT id, username, password FROM dbo.Administradores WHERE username = @rutFull OR username = @rutRaw');
+
+        const hasWorker = workerResult.recordset.length > 0;
+        const hasAdmin = adminResult.recordset.length > 0;
+
+        if (!hasWorker && !hasAdmin) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
-        const user = result.recordset[0];
-        let isMatch = await bcrypt.compare(currentPassword, user.password) || (cleanCurrent !== currentPassword && await bcrypt.compare(cleanCurrent, user.password));
+        let isMatch = false;
 
-        // Si no coincide, buscar si tiene cuenta de Admin y comparar ahí
-        if (!isMatch) {
-            const adminResult = await pool.request()
-                .input('rutFull', sql.VarChar, cleanRut)
-                .query('SELECT password FROM dbo.Administradores WHERE username = @rutFull');
-            
-            if (adminResult.recordset.length > 0) {
-                isMatch = await bcrypt.compare(currentPassword, adminResult.recordset[0].password) || (cleanCurrent !== currentPassword && await bcrypt.compare(cleanCurrent, adminResult.recordset[0].password));
-            }
+        if (hasWorker && workerResult.recordset[0].password) {
+            const wPass = workerResult.recordset[0].password;
+            isMatch = await bcrypt.compare(currentPassword, wPass) || (cleanCurrent !== currentPassword && await bcrypt.compare(cleanCurrent, wPass));
+        }
+
+        if (!isMatch && hasAdmin && adminResult.recordset[0].password) {
+            const aPass = adminResult.recordset[0].password;
+            isMatch = await bcrypt.compare(currentPassword, aPass) || (cleanCurrent !== currentPassword && await bcrypt.compare(cleanCurrent, aPass));
         }
 
         if (!isMatch) {
@@ -153,16 +162,19 @@ router.post('/change-password', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(cleanNew, salt);
 
-        // Actualizar en PERSONAL
-        await pool.request()
-            .input('rut', sql.VarChar, rutNum)
-            .input('password', sql.VarChar, hashedPassword)
-            .query('UPDATE dbo.PERSONAL SET password = @password, password_changed = 1 WHERE [RUT EMPLEADO] = @rut');
-        // Opcional: Actualizar también en Administradores si existe
-        await pool.request()
-            .input('rutFull', sql.VarChar, cleanRut)
-            .input('password', sql.VarChar, hashedPassword)
-            .query('UPDATE dbo.Administradores SET password = @password, password_changed = 1 WHERE username = @rutFull');
+        if (hasWorker) {
+            await pool.request()
+                .input('rut', sql.VarChar, rutNum)
+                .input('password', sql.VarChar, hashedPassword)
+                .query('UPDATE dbo.PERSONAL SET password = @password, password_changed = 1 WHERE [RUT EMPLEADO] = @rut');
+        }
+
+        if (hasAdmin) {
+            await pool.request()
+                .input('id', sql.Int, adminResult.recordset[0].id)
+                .input('password', sql.VarChar, hashedPassword)
+                .query('UPDATE dbo.Administradores SET password = @password, password_changed = 1 WHERE id = @id');
+        }
 
         res.json({ success: true, message: 'Contraseña cambiada exitosamente' });
 

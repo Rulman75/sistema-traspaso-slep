@@ -102,7 +102,12 @@ export default function Login() {
         localStorage.setItem('token', response.data.token);
         localStorage.setItem('user', JSON.stringify(response.data.user));
       }
-      navigate(`/dashboard?token=${response.data.token}`);
+      const roles = response.data.user?.roles || [];
+      if (roles.includes('worker')) {
+        navigate(`/dashboard?token=${response.data.token}`);
+      } else if (roles.includes('admin')) {
+        navigate('/admin/dashboard');
+      }
 
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error al cambiar la contraseña');
