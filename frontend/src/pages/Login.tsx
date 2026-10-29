@@ -20,27 +20,50 @@ export default function Login() {
     setError('');
     setLoading(true);
 
+    const cleanRut = rut.replace(/[.\-\s]/g, '').trim();
+    const cleanPassword = password.trim();
+
     try {
       const response = await axios.post('/api/auth/login', {
-        rut,
-        password
+        rut: cleanRut,
+        password: cleanPassword
       });
 
+      if (!response.data || typeof response.data !== 'object') {
+        throw new Error('RESPUESTA_INVALIDA');
+      }
+
       if (response.data.mustChangePassword) {
+        setRut(cleanRut);
+        setPassword(cleanPassword);
         setMustChangePassword(true);
       } else {
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
+        try {
+          localStorage.setItem('token', response.data.token);
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+        } catch {
+          localStorage.clear();
+          localStorage.setItem('token', response.data.token);
+          localStorage.setItem('user', JSON.stringify(response.data.user));
+        }
         
-        const roles = response.data.user.roles || [];
+        const roles = response.data.user?.roles || [];
         if (roles.includes('worker')) {
-            navigate('/dashboard');
+            navigate(`/dashboard?token=${response.data.token}`);
         } else if (roles.includes('admin')) {
             navigate('/admin/dashboard');
         }
       }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Error al iniciar sesión');
+      if (err.response?.data?.error) {
+        setError(err.response.data.error);
+      } else if (err.response?.status === 400 || err.response?.status === 431) {
+        setError('Error al iniciar sesión: Cookies saturadas en este navegador. Abra una ventana de Incógnito o presione Ctrl+F5.');
+      } else if (err.response?.status) {
+        setError(`Error al iniciar sesión (Servidor retornó código ${err.response.status}). Intente con Ctrl+F5.`);
+      } else {
+        setError('Error de conexión al iniciar sesión. Verifique su conexión a internet o intente en una ventana de Incógnito.');
+      }
     } finally {
       setLoading(false);
     }
@@ -50,28 +73,36 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    if (newPassword !== confirmPassword) {
+    if (newPassword.trim() !== confirmPassword.trim()) {
       setError('Las contraseñas nuevas no coinciden');
       return;
     }
 
+    const cleanRut = rut.replace(/[.\-\s]/g, '').trim();
+
     setLoading(true);
     try {
       await axios.post('/api/auth/change-password', {
-        rut,
-        currentPassword: password,
-        newPassword
+        rut: cleanRut,
+        currentPassword: password.trim(),
+        newPassword: newPassword.trim()
       });
 
       // Luego del cambio exitoso, volvemos a hacer login para obtener el token
       const response = await axios.post('/api/auth/login', {
-        rut,
-        password: newPassword
+        rut: cleanRut,
+        password: newPassword.trim()
       });
 
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      navigate('/dashboard');
+      try {
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      } catch {
+        localStorage.clear();
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+      navigate(`/dashboard?token=${response.data.token}`);
 
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error al cambiar la contraseña');

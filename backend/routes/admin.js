@@ -88,67 +88,100 @@ router.get('/stats', verifyAdminToken, async (req, res) => {
     }
 });
 
-// Obtener lista de trabajadores (con filtros opcionales)
+// Obtener lista de trabajadores (con filtros opcionales y paginación en servidor)
 router.get('/workers', verifyAdminToken, async (req, res) => {
-    const { rut, unidad, estado, tipo_contrato } = req.query;
+    const { rut, unidad, estado, tipo_contrato, page, limit } = req.query;
 
     try {
         const pool = await getConnection();
-        
-        let baseQuery = `
-            SELECT
-                p.[RUT EMPLEADO] as rut,
-                p.DV as dv,
-                CONCAT(p.NOMBRE, ' ', p.PATERNO, ' ', p.MATERNO) as nombre_completo,
-                CASE 
-                    WHEN p.codigoe = 384 or p.codigoe = 530 THEN pie.DES_UNIDAD_TRAB
-                    ELSE p.[NOMBRE UNIDAD]
-                END as unidad,
-                CASE 
-                    WHEN LTRIM(RTRIM(p.DETALLE)) = '1' THEN 'INDEFINIDO'
-                    WHEN LTRIM(RTRIM(p.DETALLE)) = '2' THEN 'PLAZO FIJO'
-                    WHEN LTRIM(RTRIM(p.DETALLE)) = '3' THEN 'REEMPLAZO'
-                    ELSE 'DESCONOCIDO'
-                END as tipo_contrato,
-                p.estado_validacion,
-                p.fecha_reclamo,
-                p.ruta_evidencia,
-                p.rechazo_motivo,
-                p.observaciones,
-                p.email,
-                p.celular
-            FROM dbo.PERSONAL p
-            OUTER APPLY (
-                SELECT TOP 1 DES_UNIDAD_TRAB 
-                FROM dbo.CARGA_HORARIA_SEP_PIE 
-                WHERE RUT = p.[RUT EMPLEADO]
-            ) as pie
-            WHERE p.codigo = '1'
-        `;
-
         const request = pool.request();
 
+        let whereClause = " WHERE p.CODIGO = '1' ";
+
         if (rut) {
-            baseQuery += " AND p.[RUT EMPLEADO] LIKE @rut ";
-            request.input('rut', sql.VarChar, `%${rut}%`);
+            const cleanRut = rut.toString().replace(/[.\-\s]/g, '').trim();
+            whereClause += " AND (p.[RUT EMPLEADO] LIKE @rut OR CONCAT(p.NOMBRE, ' ', p.PATERNO, ' ', p.MATERNO) LIKE @rut) ";
+            request.input('rut', sql.VarChar, `%${cleanRut}%`);
         }
         if (estado) {
-            baseQuery += " AND p.estado_validacion = @estado ";
-            request.input('estado', sql.VarChar, estado);
+            if (estado === 'PENDIENTE') {
+                whereClause += " AND (p.estado_validacion = 'PENDIENTE' OR p.estado_validacion IS NULL) ";
+            } else {
+                whereClause += " AND p.estado_validacion = @estado ";
+                request.input('estado', sql.VarChar, estado);
+            }
         }
-
-        let query = `SELECT * FROM (${baseQuery}) as results WHERE 1=1`;
-
         if (unidad) {
-            query += " AND unidad LIKE @unidad ";
+            whereClause += " AND p.[NOMBRE UNIDAD] LIKE @unidad ";
             request.input('unidad', sql.VarChar, `%${unidad}%`);
         }
         if (tipo_contrato) {
-            query += " AND tipo_contrato = @tipo_contrato ";
-            request.input('tipo_contrato', sql.VarChar, tipo_contrato);
+            if (tipo_contrato === 'INDEFINIDO') {
+                whereClause += " AND p.DETALLE = '1' ";
+            } else if (tipo_contrato === 'PLAZO FIJO') {
+                whereClause += " AND p.DETALLE = '2' ";
+            } else if (tipo_contrato === 'REEMPLAZO') {
+                whereClause += " AND p.DETALLE = '3' ";
+            }
         }
 
-        const result = await request.query(query);
+        const selectColumns = `
+            p.[RUT EMPLEADO] as rut,
+            p.DV as dv,
+            CONCAT(p.NOMBRE, ' ', p.PATERNO, ' ', p.MATERNO) as nombre_completo,
+            p.[NOMBRE UNIDAD] as unidad,
+            CASE 
+                WHEN p.DETALLE = '1' THEN 'INDEFINIDO'
+                WHEN p.DETALLE = '2' THEN 'PLAZO FIJO'
+                WHEN p.DETALLE = '3' THEN 'REEMPLAZO'
+                ELSE 'DESCONOCIDO'
+            END as tipo_contrato,
+            p.estado_validacion,
+            p.fecha_reclamo,
+            p.ruta_evidencia,
+            p.rechazo_motivo,
+            p.observaciones,
+            p.email,
+            p.celular
+        `;
+
+        if (page) {
+            const pageNum = Math.max(1, parseInt(page, 10) || 1);
+            const pageSize = Math.min(500, Math.max(1, parseInt(limit, 10) || 50));
+            const offset = (pageNum - 1) * pageSize;
+
+            request.input('offset', sql.Int, offset);
+            request.input('pageSize', sql.Int, pageSize);
+
+            const pagedQuery = `
+                SELECT COUNT(1) as total FROM dbo.PERSONAL p ${whereClause};
+                SELECT ${selectColumns}
+                FROM dbo.PERSONAL p
+                ${whereClause}
+                ORDER BY p.[RUT EMPLEADO] ASC
+                OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+            `;
+
+            const result = await request.query(pagedQuery);
+            const total = result.recordsets[0][0].total;
+            const rows = result.recordsets[1];
+
+            return res.json({
+                data: rows,
+                total,
+                page: pageNum,
+                pageSize,
+                totalPages: Math.max(1, Math.ceil(total / pageSize))
+            });
+        }
+
+        const fullQuery = `
+            SELECT ${selectColumns}
+            FROM dbo.PERSONAL p
+            ${whereClause}
+            ORDER BY p.[RUT EMPLEADO] ASC
+        `;
+        const result = await request.query(fullQuery);
         res.json(result.recordset);
     } catch (error) {
         console.error(error);

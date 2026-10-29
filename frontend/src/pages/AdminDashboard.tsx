@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Search, KeyRound, Eye, CheckCircle, AlertCircle, Clock, Users, Download, ClipboardCheck, Undo2, MonitorPlay } from 'lucide-react';
+import { Search, KeyRound, Eye, CheckCircle, AlertCircle, Clock, Users, Download, ClipboardCheck, Undo2, MonitorPlay, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface Stats {
@@ -38,18 +38,35 @@ export default function AdminDashboard() {
   const [resolutionAction, setResolutionAction] = useState<string>('');
   const [submittingResolution, setSubmittingResolution] = useState(false);
 
-  // Filters
+  // Filters & Server-Side Pagination
   const [filterRut, setFilterRut] = useState('');
+  const [debouncedRut, setDebouncedRut] = useState('');
   const [filterEstado, setFilterEstado] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalWorkers, setTotalWorkers] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [exporting, setExporting] = useState(false);
+  const PAGE_SIZE = 50;
   
   const token = localStorage.getItem('token') || localStorage.getItem('adminToken');
   const authConfig = { headers: { Authorization: `Bearer ${token}` } };
 
   useEffect(() => {
     fetchStats();
-    fetchWorkers();
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCurrentPage(1);
+      setDebouncedRut(filterRut);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [filterRut]);
+
+  useEffect(() => {
+    fetchWorkers(currentPage, debouncedRut);
+  }, [currentPage, debouncedRut, filterEstado, filterTipo]);
 
   const fetchStats = async () => {
     try {
@@ -60,21 +77,48 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchWorkers = async () => {
+  const fetchWorkers = async (pageToLoad = currentPage, rutQuery = debouncedRut) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (filterRut) params.append('rut', filterRut);
+      params.append('page', String(pageToLoad));
+      params.append('limit', String(PAGE_SIZE));
+      if (rutQuery.trim()) params.append('rut', rutQuery.trim());
       if (filterEstado) params.append('estado', filterEstado);
       if (filterTipo) params.append('tipo_contrato', filterTipo);
 
       const res = await axios.get(`/api/admin/workers?${params.toString()}`, authConfig);
-      setWorkers(res.data);
+      if (res.data && Array.isArray(res.data.data)) {
+        setWorkers(res.data.data);
+        setTotalWorkers(res.data.total || 0);
+        setTotalPages(res.data.totalPages || 1);
+      } else if (Array.isArray(res.data)) {
+        setWorkers(res.data.slice(0, PAGE_SIZE));
+        setTotalWorkers(res.data.length);
+        setTotalPages(Math.max(1, Math.ceil(res.data.length / PAGE_SIZE)));
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSearchClick = () => {
+    setDebouncedRut(filterRut);
+    if (currentPage === 1) {
+      fetchWorkers(1, filterRut);
+    } else {
+      setCurrentPage(1);
+    }
+  };
+
+  const handleClearFilters = () => {
+    setFilterRut('');
+    setDebouncedRut('');
+    setFilterEstado('');
+    setFilterTipo('');
+    setCurrentPage(1);
   };
 
   const handleResetPassword = async (rut: string, dv: string) => {
@@ -116,29 +160,44 @@ export default function AdminDashboard() {
     }
   };
 
-  const exportToExcel = () => {
-    if (workers.length === 0) {
-      alert("No hay datos para exportar");
-      return;
+  const exportToExcel = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams();
+      if (filterRut.trim()) params.append('rut', filterRut.trim());
+      if (filterEstado) params.append('estado', filterEstado);
+      if (filterTipo) params.append('tipo_contrato', filterTipo);
+
+      const res = await axios.get(`/api/admin/workers?${params.toString()}`, authConfig);
+      const allRows: Worker[] = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+
+      if (allRows.length === 0) {
+        alert("No hay datos para exportar");
+        return;
+      }
+
+      const dataToExport = allRows.map(w => ({
+        'RUT': `${w.rut}-${w.dv}`,
+        'Nombre Completo': w.nombre_completo,
+        'Unidad / Establecimiento': w.unidad || 'NO REGISTRA',
+        'Tipo de Contrato': w.tipo_contrato,
+        'Estado Validación': w.estado_validacion || 'PENDIENTE',
+        'Fecha Transacción': w.fecha_reclamo ? new Date(w.fecha_reclamo).toLocaleDateString('es-CL') : 'N/A',
+        'Motivo Rechazo': w.rechazo_motivo || '',
+        'Observaciones': w.observaciones || '',
+        'Correo': w.email || '',
+        'Teléfono': w.celular || ''
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Funcionarios");
+      XLSX.writeFile(workbook, `Reporte_Validacion_SLEP_${new Date().toISOString().slice(0,10)}.xlsx`);
+    } catch (err) {
+      alert("Error al exportar datos a Excel");
+    } finally {
+      setExporting(false);
     }
-
-    const dataToExport = workers.map(w => ({
-      'RUT': `${w.rut}-${w.dv}`,
-      'Nombre Completo': w.nombre_completo,
-      'Unidad / Establecimiento': w.unidad || 'NO REGISTRA',
-      'Tipo de Contrato': w.tipo_contrato,
-      'Estado Validación': w.estado_validacion || 'PENDIENTE',
-      'Fecha Transacción': w.fecha_reclamo ? new Date(w.fecha_reclamo).toLocaleDateString('es-CL') : 'N/A',
-      'Motivo Rechazo': w.rechazo_motivo || '',
-      'Observaciones': w.observaciones || '',
-      'Correo': w.email || '',
-      'Teléfono': w.celular || ''
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Funcionarios");
-    XLSX.writeFile(workbook, `Reporte_Validacion_SLEP_${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
   const handleUndoValidation = async (rut: string, nombre: string) => {
@@ -193,12 +252,13 @@ export default function AdminDashboard() {
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[calc(100vh-250px)] min-h-[600px]">
         <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-wrap gap-4 items-end">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Buscar por RUT</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Buscar por RUT o Nombre</label>
             <input 
               type="text" 
               placeholder="Ej: 12345678" 
               value={filterRut}
               onChange={(e) => setFilterRut(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSearchClick(); }}
               className="px-3 py-1.5 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 outline-none w-40"
             />
           </div>
@@ -206,7 +266,7 @@ export default function AdminDashboard() {
             <label className="block text-xs font-medium text-slate-500 mb-1">Estado Validación</label>
             <select 
               value={filterEstado}
-              onChange={(e) => setFilterEstado(e.target.value)}
+              onChange={(e) => { setCurrentPage(1); setFilterEstado(e.target.value); }}
               className="px-3 py-1.5 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 outline-none w-40"
             >
               <option value="">Todos</option>
@@ -222,7 +282,7 @@ export default function AdminDashboard() {
             <label className="block text-xs font-medium text-slate-500 mb-1">Tipo Contrato</label>
             <select 
               value={filterTipo}
-              onChange={(e) => setFilterTipo(e.target.value)}
+              onChange={(e) => { setCurrentPage(1); setFilterTipo(e.target.value); }}
               className="px-3 py-1.5 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 outline-none w-40"
             >
               <option value="">Todos</option>
@@ -232,7 +292,7 @@ export default function AdminDashboard() {
             </select>
           </div>
           <button 
-            onClick={fetchWorkers}
+            onClick={handleSearchClick}
             disabled={loading}
             className={`bg-slate-800 text-white px-4 py-1.5 text-sm rounded hover:bg-slate-700 transition flex items-center gap-2 ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
           >
@@ -252,11 +312,21 @@ export default function AdminDashboard() {
           </button>
 
           <button 
+            onClick={handleClearFilters}
+            disabled={loading}
+            className="bg-slate-200 text-slate-700 px-3 py-1.5 text-sm rounded hover:bg-slate-300 transition flex items-center gap-1.5"
+            title="Limpiar todos los filtros"
+          >
+            <RotateCcw size={15} /> Limpiar Filtro
+          </button>
+
+          <button 
             onClick={exportToExcel}
-            className="bg-green-600 text-white px-4 py-1.5 text-sm rounded hover:bg-green-700 transition flex items-center gap-2 ml-auto"
+            disabled={exporting}
+            className="bg-green-600 text-white px-4 py-1.5 text-sm rounded hover:bg-green-700 transition flex items-center gap-2 ml-auto disabled:opacity-60"
             title="Exportar a Excel"
           >
-            <Download size={16} /> Exportar Excel
+            <Download size={16} /> {exporting ? 'Exportando...' : 'Exportar Excel'}
           </button>
         </div>
 
@@ -278,8 +348,8 @@ export default function AdminDashboard() {
               ) : workers.length === 0 ? (
                 <tr><td colSpan={6} className="text-center py-8 text-slate-400">No se encontraron trabajadores</td></tr>
               ) : (
-                workers.map((w, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50">
+                workers.map((w) => (
+                  <tr key={w.rut} className="hover:bg-slate-50">
                     <td className="px-4 py-3 whitespace-nowrap">{w.rut}-{w.dv}</td>
                     <td className="px-4 py-3">{w.nombre_completo}</td>
                     <td className="px-4 py-3 text-xs">{w.unidad || '-'}</td>
@@ -346,6 +416,34 @@ export default function AdminDashboard() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Barra de Paginación */}
+        <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-600">
+          <div>
+            Mostrando <span className="font-semibold text-slate-800">{totalWorkers === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1}</span> a{' '}
+            <span className="font-semibold text-slate-800">{Math.min(currentPage * PAGE_SIZE, totalWorkers)}</span> de{' '}
+            <span className="font-semibold text-slate-800">{totalWorkers}</span> funcionarios
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1 || loading}
+              className="px-2.5 py-1 border border-slate-300 rounded bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium"
+            >
+              <ChevronLeft size={14} /> Anterior
+            </button>
+            <span className="px-2 font-medium text-slate-700">
+              Página {currentPage} de {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages || loading}
+              className="px-2.5 py-1 border border-slate-300 rounded bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 font-medium"
+            >
+              Siguiente <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
       </div>
 

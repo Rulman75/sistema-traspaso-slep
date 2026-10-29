@@ -11,8 +11,11 @@ router.post('/login', async (req, res) => {
         return res.status(400).json({ error: 'RUT y contraseña son requeridos' });
     }
 
-    let rutNum = rut.slice(0, -1);
-    let dv = rut.slice(-1).toUpperCase();
+    const cleanRut = rut.toString().replace(/[.\-\s]/g, '').trim();
+    const cleanPass = password.toString().trim();
+
+    let rutNum = cleanRut.slice(0, -1);
+    let dv = cleanRut.slice(-1).toUpperCase();
 
     try {
         const pool = await getConnection();
@@ -21,11 +24,11 @@ router.post('/login', async (req, res) => {
         const workerResult = await pool.request()
             .input('rut', sql.VarChar, rutNum)
             .input('dv', sql.VarChar, dv)
-            .query('SELECT [RUT EMPLEADO] as rut_empleado, DV as dv, NOMBRE, PATERNO, MATERNO, password, password_changed FROM dbo.PERSONAL WHERE [RUT EMPLEADO] = @rut AND (DV = @dv OR DV = LOWER(@dv)) AND codigo = \'1\'');
+            .query('SELECT [RUT EMPLEADO] as rut_empleado, DV as dv, NOMBRE, PATERNO, MATERNO, password, password_changed FROM dbo.PERSONAL WHERE [RUT EMPLEADO] = @rut AND (LTRIM(RTRIM(DV)) = @dv OR LOWER(LTRIM(RTRIM(DV))) = LOWER(@dv)) AND codigo = \'1\'');
         
         // 2. Buscar en Administradores
         const adminResult = await pool.request()
-            .input('username', sql.VarChar, rut)
+            .input('username', sql.VarChar, cleanRut)
             .query('SELECT * FROM dbo.Administradores WHERE username = @username');
 
         let isWorker = workerResult.recordset.length > 0;
@@ -47,11 +50,11 @@ router.post('/login', async (req, res) => {
         let matchAdmin = false;
 
         if (isWorker) {
-            matchWorker = await bcrypt.compare(password, userRecord.password);
+            matchWorker = await bcrypt.compare(password, userRecord.password) || (cleanPass !== password && await bcrypt.compare(cleanPass, userRecord.password));
         }
         
         if (isAdmin) {
-            matchAdmin = await bcrypt.compare(password, adminRecord.password);
+            matchAdmin = await bcrypt.compare(password, adminRecord.password) || (cleanPass !== password && await bcrypt.compare(cleanPass, adminRecord.password));
         }
 
         if (!matchWorker && !matchAdmin) {
@@ -111,31 +114,35 @@ router.post('/login', async (req, res) => {
 
 router.post('/change-password', async (req, res) => {
     const { rut, currentPassword, newPassword } = req.body;
-    let rutNum = rut.slice(0, -1);
-    let dv = rut.slice(-1).toUpperCase();
+    const cleanRut = (rut || '').toString().replace(/[.\-\s]/g, '').trim();
+    const cleanCurrent = (currentPassword || '').toString().trim();
+    const cleanNew = (newPassword || '').toString().trim();
+
+    let rutNum = cleanRut.slice(0, -1);
+    let dv = cleanRut.slice(-1).toUpperCase();
 
     try {
         const pool = await getConnection();
         const result = await pool.request()
             .input('rut', sql.VarChar, rutNum)
             .input('dv', sql.VarChar, dv)
-            .query('SELECT [RUT EMPLEADO] as rut_empleado, password FROM dbo.PERSONAL WHERE [RUT EMPLEADO] = @rut AND (DV = @dv OR DV = LOWER(@dv))');
+            .query('SELECT [RUT EMPLEADO] as rut_empleado, password FROM dbo.PERSONAL WHERE [RUT EMPLEADO] = @rut AND (LTRIM(RTRIM(DV)) = @dv OR LOWER(LTRIM(RTRIM(DV))) = LOWER(@dv))');
 
         if (result.recordset.length === 0) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
         const user = result.recordset[0];
-        let isMatch = await bcrypt.compare(currentPassword, user.password);
+        let isMatch = await bcrypt.compare(currentPassword, user.password) || (cleanCurrent !== currentPassword && await bcrypt.compare(cleanCurrent, user.password));
 
         // Si no coincide, buscar si tiene cuenta de Admin y comparar ahí
         if (!isMatch) {
             const adminResult = await pool.request()
-                .input('rutFull', sql.VarChar, rut)
+                .input('rutFull', sql.VarChar, cleanRut)
                 .query('SELECT password FROM dbo.Administradores WHERE username = @rutFull');
             
             if (adminResult.recordset.length > 0) {
-                isMatch = await bcrypt.compare(currentPassword, adminResult.recordset[0].password);
+                isMatch = await bcrypt.compare(currentPassword, adminResult.recordset[0].password) || (cleanCurrent !== currentPassword && await bcrypt.compare(cleanCurrent, adminResult.recordset[0].password));
             }
         }
 
@@ -144,7 +151,7 @@ router.post('/change-password', async (req, res) => {
         }
 
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
+        const hashedPassword = await bcrypt.hash(cleanNew, salt);
 
         // Actualizar en PERSONAL
         await pool.request()
@@ -153,7 +160,7 @@ router.post('/change-password', async (req, res) => {
             .query('UPDATE dbo.PERSONAL SET password = @password, password_changed = 1 WHERE [RUT EMPLEADO] = @rut');
         // Opcional: Actualizar también en Administradores si existe
         await pool.request()
-            .input('rutFull', sql.VarChar, rut)
+            .input('rutFull', sql.VarChar, cleanRut)
             .input('password', sql.VarChar, hashedPassword)
             .query('UPDATE dbo.Administradores SET password = @password, password_changed = 1 WHERE username = @rutFull');
 
