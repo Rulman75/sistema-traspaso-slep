@@ -87,7 +87,7 @@ router.post('/login', async (req, res) => {
                 const fechaTxt = cfg.fecha_cierre ? ` con fecha ${cfg.fecha_cierre}` : '';
                 const extraTxt = cfg.mensaje_adicional ? `\n\n${cfg.mensaje_adicional}` : '';
                 return res.status(403).json({
-                    error: `El proceso de validación de antecedentes ha sido finalizado${fechaTxt}.${extraTxt}`
+                    error: `El proceso de validación de antecedentes ha finalizado${fechaTxt}.${extraTxt}`
                 });
             }
         }

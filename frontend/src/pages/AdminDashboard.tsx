@@ -629,7 +629,7 @@ export default function AdminDashboard() {
                   Vista previa del mensaje que verán los funcionarios:
                 </p>
                 <p className="text-sm">
-                  El proceso de validación de antecedentes ha sido finalizado
+                  El proceso de validación de antecedentes ha finalizado
                   {fechaCierre ? <> con fecha <strong>{fechaCierre}</strong></> : ''}.
                 </p>
                 {mensajeAdicional && (

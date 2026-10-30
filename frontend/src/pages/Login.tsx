@@ -158,7 +158,7 @@ export default function Login() {
               <span>Proceso de Validación Finalizado</span>
             </div>
             <p className="text-sm leading-relaxed">
-              El proceso de validación de antecedentes ha sido finalizado
+              El proceso de validación de antecedentes ha finalizado
               {fechaCierre ? <> con fecha <strong>{fechaCierre}</strong></> : ''}.
             </p>
             {mensajeAdicional && (
