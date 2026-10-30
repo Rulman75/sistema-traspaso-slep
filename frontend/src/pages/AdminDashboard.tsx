@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Search, KeyRound, Eye, CheckCircle, AlertCircle, Clock, Users, Download, ClipboardCheck, Undo2, MonitorPlay, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { Search, KeyRound, Eye, CheckCircle, AlertCircle, Clock, Users, Download, ClipboardCheck, Undo2, MonitorPlay, ChevronLeft, ChevronRight, RotateCcw, Lock, Unlock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface Stats {
@@ -38,6 +38,13 @@ export default function AdminDashboard() {
   const [resolutionAction, setResolutionAction] = useState<string>('');
   const [submittingResolution, setSubmittingResolution] = useState(false);
 
+  // Modal Cierre de Proceso
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [procesoCerrado, setProcesoCerrado] = useState(false);
+  const [fechaCierre, setFechaCierre] = useState('');
+  const [mensajeAdicional, setMensajeAdicional] = useState('');
+  const [savingConfig, setSavingConfig] = useState(false);
+
   // Filters & Server-Side Pagination
   const [filterRut, setFilterRut] = useState('');
   const [debouncedRut, setDebouncedRut] = useState('');
@@ -54,7 +61,38 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchStats();
+    fetchSystemConfig();
   }, []);
+
+  const fetchSystemConfig = async () => {
+    try {
+      const res = await axios.get('/api/admin/system-config', authConfig);
+      if (res.data) {
+        setProcesoCerrado(Boolean(res.data.proceso_cerrado));
+        setFechaCierre(res.data.fecha_cierre || '');
+        setMensajeAdicional(res.data.mensaje_adicional || '');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSaveSystemConfig = async () => {
+    setSavingConfig(true);
+    try {
+      await axios.put('/api/admin/system-config', {
+        proceso_cerrado: procesoCerrado,
+        fecha_cierre: fechaCierre,
+        mensaje_adicional: mensajeAdicional
+      }, authConfig);
+      alert('Configuración del proceso guardada correctamente.');
+      setShowConfigModal(false);
+    } catch (err) {
+      alert('Error al guardar la configuración.');
+    } finally {
+      setSavingConfig(false);
+    }
+  };
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -320,14 +358,29 @@ export default function AdminDashboard() {
             <RotateCcw size={15} /> Limpiar Filtro
           </button>
 
-          <button 
-            onClick={exportToExcel}
-            disabled={exporting}
-            className="bg-green-600 text-white px-4 py-1.5 text-sm rounded hover:bg-green-700 transition flex items-center gap-2 ml-auto disabled:opacity-60"
-            title="Exportar a Excel"
-          >
-            <Download size={16} /> {exporting ? 'Exportando...' : 'Exportar Excel'}
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setShowConfigModal(true)}
+              className={`px-3 py-1.5 text-sm rounded font-medium transition flex items-center gap-1.5 border ${
+                procesoCerrado
+                  ? 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
+                  : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+              }`}
+              title="Configurar bloqueo o cierre del proceso para funcionarios"
+            >
+              {procesoCerrado ? <Lock size={15} /> : <Unlock size={15} />}
+              {procesoCerrado ? 'Proceso Cerrado (Bloqueado)' : 'Cierre de Proceso'}
+            </button>
+
+            <button 
+              onClick={exportToExcel}
+              disabled={exporting}
+              className="bg-green-600 text-white px-4 py-1.5 text-sm rounded hover:bg-green-700 transition flex items-center gap-2 disabled:opacity-60"
+              title="Exportar a Excel"
+            >
+              <Download size={16} /> {exporting ? 'Exportando...' : 'Exportar Excel'}
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto">
@@ -511,6 +564,95 @@ export default function AdminDashboard() {
                 className="px-6 py-2 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submittingResolution ? 'Enviando...' : 'Guardar y Enviar Correo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConfigModal && (
+        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                {procesoCerrado ? <Lock size={20} className="text-red-600" /> : <Unlock size={20} className="text-amber-600" />}
+                Configurar Cierre de Proceso de Validación
+              </h3>
+              <button onClick={() => setShowConfigModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl">&times;</button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <label className="flex items-start gap-3 p-3.5 rounded-lg border border-slate-200 bg-slate-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={procesoCerrado}
+                  onChange={(e) => setProcesoCerrado(e.target.checked)}
+                  className="mt-1 h-4 w-4 accent-[#016098]"
+                />
+                <div>
+                  <span className="font-semibold text-sm text-slate-800 block">
+                    Bloquear el ingreso de Funcionarios a la plataforma
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    Al activar esta opción, los funcionarios verán el mensaje de finalización en la pantalla de inicio y no podrán ingresar. Los Administradores podrán seguir ingresando normalmente.
+                  </span>
+                </div>
+              </label>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Fecha de finalización del proceso (dd-mm-yyyy):
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: 31-10-2026"
+                  value={fechaCierre}
+                  onChange={(e) => setFechaCierre(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#016098]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
+                  Mensaje adicional para informar (Opcional):
+                </label>
+                <textarea
+                  placeholder="Ej: Para consultas adicionales puede escribir a RRHHResponde@cmds.cl..."
+                  value={mensajeAdicional}
+                  onChange={(e) => setMensajeAdicional(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-[#016098] min-h-[90px]"
+                />
+              </div>
+
+              <div className="bg-amber-50 border border-amber-300 text-amber-900 p-4 rounded-xl">
+                <p className="text-xs font-bold uppercase tracking-wide text-amber-700 mb-1">
+                  Vista previa del mensaje que verán los funcionarios:
+                </p>
+                <p className="text-sm">
+                  El proceso de validación de antecedentes ha sido finalizado
+                  {fechaCierre ? <> con fecha <strong>{fechaCierre}</strong></> : ''}.
+                </p>
+                {mensajeAdicional && (
+                  <p className="text-sm mt-2 pt-2 border-t border-amber-200 whitespace-pre-line font-medium">
+                    {mensajeAdicional}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+              <button
+                onClick={() => setShowConfigModal(false)}
+                className="px-4 py-2 border border-slate-300 rounded text-slate-600 hover:bg-slate-100 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveSystemConfig}
+                disabled={savingConfig}
+                className="px-5 py-2 bg-[#016098] text-white rounded text-sm font-medium hover:bg-[#014f7d] disabled:opacity-50"
+              >
+                {savingConfig ? 'Guardando...' : 'Guardar Configuración'}
               </button>
             </div>
           </div>

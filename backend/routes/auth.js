@@ -4,6 +4,24 @@ const { getConnection, sql } = require('../db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+router.get('/system-status', async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const result = await pool.request().query('SELECT TOP 1 proceso_cerrado, fecha_cierre, mensaje_adicional FROM dbo.ConfiguracionSistema WHERE id = 1');
+        if (result.recordset.length === 0) {
+            return res.json({ proceso_cerrado: false, fecha_cierre: '', mensaje_adicional: '' });
+        }
+        const cfg = result.recordset[0];
+        res.json({
+            proceso_cerrado: Boolean(cfg.proceso_cerrado),
+            fecha_cierre: cfg.fecha_cierre || '',
+            mensaje_adicional: cfg.mensaje_adicional || ''
+        });
+    } catch (error) {
+        res.json({ proceso_cerrado: false, fecha_cierre: '', mensaje_adicional: '' });
+    }
+});
+
 router.post('/login', async (req, res) => {
     const { rut, password } = req.body;
 
@@ -59,6 +77,19 @@ router.post('/login', async (req, res) => {
 
         if (!matchWorker && !matchAdmin) {
             return res.status(401).json({ error: 'Credenciales inválidas' });
+        }
+
+        // Verificar si el proceso de validación está bloqueado para funcionarios (los administradores sí pueden entrar)
+        if (!(isAdmin && matchAdmin)) {
+            const cfgRes = await pool.request().query('SELECT TOP 1 proceso_cerrado, fecha_cierre, mensaje_adicional FROM dbo.ConfiguracionSistema WHERE id = 1');
+            if (cfgRes.recordset.length > 0 && cfgRes.recordset[0].proceso_cerrado) {
+                const cfg = cfgRes.recordset[0];
+                const fechaTxt = cfg.fecha_cierre ? ` con fecha ${cfg.fecha_cierre}` : '';
+                const extraTxt = cfg.mensaje_adicional ? `\n\n${cfg.mensaje_adicional}` : '';
+                return res.status(403).json({
+                    error: `El proceso de validación de antecedentes ha sido finalizado${fechaTxt}.${extraTxt}`
+                });
+            }
         }
 
         // Verificar si el trabajador está en TRASPASO_FUNCIONARIOS

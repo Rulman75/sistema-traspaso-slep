@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { Lock } from 'lucide-react';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -9,6 +10,24 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Estado de bloqueo del proceso de validación
+  const [procesoCerrado, setProcesoCerrado] = useState(false);
+  const [fechaCierre, setFechaCierre] = useState('');
+  const [mensajeAdicional, setMensajeAdicional] = useState('');
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+
+  useEffect(() => {
+    axios.get('/api/auth/system-status')
+      .then((res) => {
+        if (res.data) {
+          setProcesoCerrado(Boolean(res.data.proceso_cerrado));
+          setFechaCierre(res.data.fecha_cierre || '');
+          setMensajeAdicional(res.data.mensaje_adicional || '');
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Estados para cambio de contraseña obligatorio
   const [mustChangePassword, setMustChangePassword] = useState(false);
@@ -126,19 +145,47 @@ export default function Login() {
         <h2 className="text-2xl font-bold text-center text-[#016098] mb-2">
           {mustChangePassword ? 'Cambio de Contraseña' : 'Traspaso SLEP'}
         </h2>
-        <p className="text-center text-slate-500 mb-8 text-sm">
+        <p className="text-center text-slate-500 mb-6 text-sm">
           {mustChangePassword 
             ? 'Por seguridad, debes cambiar tu contraseña inicial'
             : 'Plataforma de Validación de Antecedentes'}
         </p>
 
+        {procesoCerrado && !mustChangePassword && (
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 p-4 rounded-xl mb-6 shadow-sm">
+            <div className="flex items-center gap-2 font-bold text-amber-800 mb-2">
+              <Lock size={18} className="shrink-0" />
+              <span>Proceso de Validación Finalizado</span>
+            </div>
+            <p className="text-sm leading-relaxed">
+              El proceso de validación de antecedentes ha sido finalizado
+              {fechaCierre ? <> con fecha <strong>{fechaCierre}</strong></> : ''}.
+            </p>
+            {mensajeAdicional && (
+              <p className="text-sm leading-relaxed mt-3 pt-3 border-t border-amber-200 whitespace-pre-line font-medium">
+                {mensajeAdicional}
+              </p>
+            )}
+          </div>
+        )}
+
         {error && (
-          <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-200">
+          <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-200 whitespace-pre-line">
             {error}
           </div>
         )}
 
-        {!mustChangePassword ? (
+        {procesoCerrado && !mustChangePassword && !showAdminLogin ? (
+          <div className="text-center pt-2">
+            <button
+              type="button"
+              onClick={() => setShowAdminLogin(true)}
+              className="text-xs text-slate-400 hover:text-[#016098] underline transition"
+            >
+              Acceso exclusivo Administradores
+            </button>
+          </div>
+        ) : !mustChangePassword ? (
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">RUT (sin puntos ni guion)</label>

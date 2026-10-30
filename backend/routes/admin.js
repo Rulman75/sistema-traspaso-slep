@@ -506,4 +506,55 @@ router.post('/workers/:rut/reset', verifyAdminToken, async (req, res) => {
     }
 });
 
+// Configuración de Cierre de Proceso
+router.get('/system-config', verifyAdminToken, async (req, res) => {
+    try {
+        const pool = await getConnection();
+        const result = await pool.request().query('SELECT TOP 1 proceso_cerrado, fecha_cierre, mensaje_adicional FROM dbo.ConfiguracionSistema WHERE id = 1');
+        if (result.recordset.length === 0) {
+            return res.json({ proceso_cerrado: false, fecha_cierre: '', mensaje_adicional: '' });
+        }
+        const cfg = result.recordset[0];
+        res.json({
+            proceso_cerrado: Boolean(cfg.proceso_cerrado),
+            fecha_cierre: cfg.fecha_cierre || '',
+            mensaje_adicional: cfg.mensaje_adicional || ''
+        });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al obtener configuración del sistema' });
+    }
+});
+
+router.put('/system-config', verifyAdminToken, async (req, res) => {
+    const { proceso_cerrado, fecha_cierre, mensaje_adicional } = req.body;
+    try {
+        const pool = await getConnection();
+        await pool.request()
+            .input('cerrado', sql.Bit, proceso_cerrado ? 1 : 0)
+            .input('fecha', sql.VarChar(20), (fecha_cierre || '').toString().trim())
+            .input('mensaje', sql.NVarChar(sql.MAX), (mensaje_adicional || '').toString().trim())
+            .query(`
+                IF EXISTS (SELECT 1 FROM dbo.ConfiguracionSistema WHERE id = 1)
+                BEGIN
+                    UPDATE dbo.ConfiguracionSistema
+                    SET proceso_cerrado = @cerrado,
+                        fecha_cierre = @fecha,
+                        mensaje_adicional = @mensaje,
+                        updated_at = GETDATE()
+                    WHERE id = 1
+                END
+                ELSE
+                BEGIN
+                    INSERT INTO dbo.ConfiguracionSistema (id, proceso_cerrado, fecha_cierre, mensaje_adicional)
+                    VALUES (1, @cerrado, @fecha, @mensaje)
+                END
+            `);
+        res.json({ success: true, message: 'Configuración de cierre de proceso actualizada correctamente' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al guardar configuración del sistema' });
+    }
+});
+
 module.exports = router;
